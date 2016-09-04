@@ -3,8 +3,9 @@ var bodyParser = require('body-parser');
 var request = require('request');
 var pg = require('pg');
 
-var duration = require('./assets/duration.js')
-var readable = require('./assets/readable.js')
+var duration = require('./assets/duration.js');
+var readable = require('./assets/readable.js');
+var text = require('./assets/text.js');
 
 var app = express();
 var jsonParser = bodyParser.json();
@@ -47,8 +48,8 @@ app.post('/webhook/', jsonParser, function (req, res) {
         else if (event.read) {
             // for a worker or slacker?
             getWorker(sender).then(function(res) {
-                if (res) { workerTurnsSlacker(res); }    // worker
-                else { initReminders(sender); }             // slacker
+                if (res) { workerTurnsSlacker(res); }   // worker
+                else { initReminders(sender); }         // slacker
 
             }, function(err) {
                 console.log(err);
@@ -67,7 +68,8 @@ function generateResponse(sender, message) {
         addSlacker(sender).then(function(res) {
             if (res) {
                 var read = readable.readable(response);
-                sendTextMessage(sender, "Okay, I'll give ya " + read);
+                var tm = text.start(read);
+                sendTextMessage(sender, tm);
 
                 // set a timer
                 var delay = response * 1000;
@@ -79,26 +81,21 @@ function generateResponse(sender, message) {
     }
 
     else {
-        sendTextMessage(sender, "I have absolutely no idea what that means.");
-        sendTextMessage(sender, "Wait why are you even here!?");
+        var tm = text.unknown()
+        sendTextMessage(sender, tm);
     }
 }
 
 function newTimer(sender, read) {
     // set remind to true
     setSlackerNotify(sender, true).then(function(res) {
-        sendTextMessage(sender, read + " is up. Time to get the hell off.");
+        var tm = text.time(read)
+        sendTextMessage(sender, tm);
         setTimeout(tryToRemove, 5000, sender, 0);
         // Now /webhook/ will send reminders with read receipts
     }, function(err) {
         console.log(err);
     })
-}
-
-function getOffReminder(sender) {
-    var options = []
-    var text = options[Math.random() * options.length]
-    sendTextMessage(sender, text);
 }
 
 function sendTextMessage(sender, text) {
@@ -125,14 +122,22 @@ function sendTextMessage(sender, text) {
 function initReminders(sender) {
     // get the baseline of seq
     getSlacker(sender).then(function(res) {
-        if (res.notify && res.seq < 10) {
-            // then they need to get off!!
-            setSlackerSeq(sender, res.seq).then(function(res) {
-                setTimeout(sendTextMessage, 2000, sender, "come on, get off already " + res);
-                setTimeout(tryToRemove, 60000, sender, res);
-            }, function(err) {
-                console.log(err);
-            });
+        if (res.notify) {
+            if (res.seq >= 10) {
+                // give up
+                deleteSlacker(sender);
+                sendTextMessage(sender, "Alright, I tried. Guess there's nothing stopping you.");
+            }
+            else {
+                // then they need to get off!!
+                setSlackerSeq(sender, res.seq).then(function(res) {
+                    var tm = text.reminder()
+                    setTimeout(sendTextMessage, 1000, sender, tm);
+                    setTimeout(tryToRemove, 60000, sender, res);
+                }, function(err) {
+                    console.log(err);
+                });
+            }
         }
     }, function(err) {
         console.log(err);
@@ -143,13 +148,7 @@ function tryToRemove(sender, seq) {
     getSlacker(sender).then(function(res) {
         // see if unread message count hasn't changed
         if (seq == res.seq) {
-            pg.connect(process.env.DATABASE_URL, function(err, client, done) {
-            client.query("DELETE FROM slackers WHERE sender = "+sender, 
-                function(err, result) {
-                    done();
-                    if (err) { console.log(Error('Error deleting slacker '+ sender)); }
-                });
-            });
+            deleteSlacker(sender);
             // make into a worker, will notify when they next read this
             slackerTurnsWorker(sender);
         }
@@ -174,11 +173,8 @@ function slackerTurnsWorker(sender) {
 
 function workerTurnsSlacker(worker) {
     // use worker.date to figure out how long it's been and send relevant message    
-    addSlacker(worker.sender).then(function(res) {
-        if (res) { sendTextMessage(worker.sender, "Well well well look who's back?"); }
-    }, function(err) {
-        console.log(err);
-    });
+    var tm = text.returns();
+    sendTextMessage(worker.sender, tm); 
 }
 
 function addSlacker(sender) {
@@ -193,6 +189,16 @@ function addSlacker(sender) {
                     return;
                 }
             });
+        });
+    });
+}
+
+function deleteSlacker(sender) {
+    pg.connect(process.env.DATABASE_URL, function(err, client, done) {
+    client.query("DELETE FROM slackers WHERE sender = "+sender, 
+        function(err, result) {
+            done();
+            if (err) { console.log(Error('Error deleting slacker '+ sender)); }
         });
     });
 }
