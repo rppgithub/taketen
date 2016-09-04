@@ -45,7 +45,14 @@ app.post('/webhook/', jsonParser, function (req, res) {
 
         // was it read?
         else if (event.read) {
-            initReminders(sender);
+            // for a worker or slacker?
+            getWorker(sender).then(function(res) {
+                if (res) { workerTurnsSlacker(res); }    // worker
+                else { initReminders(sender); }             // slacker
+
+            }, function(err) {
+                console.log(err);
+            });
         }
     }
     res.sendStatus(200);
@@ -122,7 +129,7 @@ function initReminders(sender) {
             // then they need to get off!!
             setSlackerSeq(sender, res.seq).then(function(res) {
                 setTimeout(sendTextMessage, 2000, sender, "come on, get off already " + res);
-                setTimeout(tryToRemove, 5000, sender, res);
+                setTimeout(tryToRemove, 60000, sender, res);
             }, function(err) {
                 console.log(err);
             });
@@ -140,17 +147,38 @@ function tryToRemove(sender, seq) {
             client.query("DELETE FROM slackers WHERE sender = "+sender, 
                 function(err, result) {
                     done();
-                    if (err) { console.log(Error('Error adding slacker '+ sender)); }
-                    else { 
-                        sendTextMessage(sender, "Good job. Only took you "+seq+" notifications.");
-                        return;
-                    }
+                    if (err) { console.log(Error('Error deleting slacker '+ sender)); }
                 });
             });
+            // make into a worker, will notify when they next read this
+            slackerTurnsWorker(sender);
         }
     }, function(err) {
         console.log(err);
     })    
+}
+
+function slackerTurnsWorker(sender) {
+    var date = new Date();
+    // add slacker to worker 
+    pg.connect(process.env.DATABASE_URL, function(err, client, done) {
+    client.query("INSERT INTO workers VALUES ("+sender+", '"+date.toUTCString()+"')", 
+        function(err, result) {
+            done();
+            if (err) { console.log(Error('Error adding worker '+ sender)); }
+        });
+    });
+    // confirmation that it ended 
+    // sendTextMessage(sender, "Good job, worker.");
+}
+
+function workerTurnsSlacker(worker) {
+    // use worker.date to figure out how long it's been and send relevant message    
+    addSlacker(worker.sender).then(function(res) {
+        if (res) { sendTextMessage(worker.sender, "Well well well look who's back?"); }
+    }, function(err) {
+        console.log(err);
+    });
 }
 
 function addSlacker(sender) {
@@ -208,16 +236,26 @@ function getSlacker(sender) {
         client.query("SELECT * FROM slackers WHERE sender = "+sender,
             function(err, result) {
                 done();
-                if (err) { 
-                    reject(Error('Error getting slacker '+sender+', '+err)); 
-                }
-                else if (result.rows.length != 1) {
-                    reject(Error('Error: slacker '+sender+' returned '+result.rows.length+' results')); 
-                }
-                else { resolve(result.rows[0]); }
-            })    
-        })
-    })
+                if (err) { reject(Error('Error getting slacker '+sender+', '+err)); }
+                else if (result.rows.length != 1) { resolve(false); } // no such slacker
+                else { resolve(result.rows[0]); } // here's your slacker
+            });  
+        });
+    });
+}
+
+function getWorker(sender) {
+    return new Promise(function(resolve, reject) {
+        pg.connect(process.env.DATABASE_URL, function(err, client, done) {
+        client.query("DELETE FROM workers WHERE sender = "+sender+" RETURNING *",
+            function(err, result) {
+                done();
+                if (err) { reject(Error('Error getting worker '+sender+', '+err)); }
+                else if (result.rows.length != 1) { resolve(false); } // no such worker
+                else { resolve(result.rows[0]); } // here's your worker
+            });  
+        });
+    });
 }
 
 // Serve the server
