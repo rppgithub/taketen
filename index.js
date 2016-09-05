@@ -22,7 +22,7 @@ app.use(bodyParser.json());
 
 // Index route
 app.get('/', function (req, res) {
-    res.send('Hello world, I am a chat bot');
+    res.send("<p>I'm just a lowly backend. Check out <a href='http://zachschnell.com/take10'>my website</a> for details.</p>");
 })
 
 // for Facebook verification
@@ -65,9 +65,14 @@ function generateResponse(sender, message) {
     var response = duration.duration(message.text);
 
     if (response) {
+        var read = readable.readable(response);
+        if (response > 600) { // must be < 10 minutes
+            sendTextMessage(sender, "Like hell I'm going to let you procrastinate for "+read+". Try something less than 10 minutes.")
+            return;
+        }
+
         addSlacker(sender).then(function(res) {
             if (res) {
-                var read = readable.readable(response);
                 var tm = text.start(read);
                 sendTextMessage(sender, tm);
 
@@ -131,8 +136,9 @@ function initReminders(sender) {
             else {
                 // then they need to get off!!
                 setSlackerSeq(sender, res.seq).then(function(res) {
-                    var tm = text.reminder()
-                    setTimeout(sendTextMessage, 1000, sender, tm);
+                    var tm = text.reminder();
+                    var rand = Math.floor(Math.random()*1500)+500;
+                    setTimeout(sendTextMessage, rand, sender, tm);
                     setTimeout(tryToRemove, 60000, sender, res);
                 }, function(err) {
                     console.log(err);
