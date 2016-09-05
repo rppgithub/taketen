@@ -96,7 +96,7 @@ function newTimer(sender, read) {
     setSlackerNotify(sender, true).then(function(res) {
         var tm = text.time(read)
         sendTextMessage(sender, tm);
-        setTimeout(tryToRemove, 5000, sender, 0);
+        setTimeout(tryToRemove, 60000, sender, 0);
         // Now /webhook/ will send reminders with read receipts
     }, function(err) {
         console.log(err);
